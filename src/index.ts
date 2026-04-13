@@ -279,18 +279,19 @@ class SpinalMain {
     }
 
     const direction = diff > 0 ? 1 : -1;
-    const totalSteps = Math.ceil(Math.abs(diff));
+    const maxStepSize = stepIntervalMs / 1000; // 1% per second => e.g. 10% per 10s
+    const totalSteps = Math.ceil(Math.abs(diff) / maxStepSize);
 
-    console.log(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Current: ${currentValue}% -> Target: ${targetPercent}% | ${totalSteps} steps of ${direction > 0 ? '+' : '-'}1% every ${stepIntervalMs}ms`);
+    console.log(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Current: ${currentValue}% -> Target: ${targetPercent}% | ${totalSteps} steps of ${direction > 0 ? '+' : '-'}${maxStepSize}% every ${stepIntervalMs}ms`);
 
     return new Promise((resolve) => {
       let step = 0;
       const interval = setInterval(async () => {
         step++;
-        const remaining = Math.abs(targetPercent - (currentValue + direction * step));
-        const newValue = remaining < 1
+        const projected = currentValue + direction * maxStepSize * step;
+        const newValue = Math.abs(targetPercent - projected) < maxStepSize
           ? targetPercent
-          : Math.round((currentValue + direction * step) * 100) / 100;
+          : Math.round(projected * 100) / 100;
 
         await this.setEndpointCurrentValue(endpoint, newValue);
         console.log(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Step ${step}/${totalSteps} -> ${newValue}%`);
@@ -335,6 +336,31 @@ class SpinalMain {
   }
 
 
+  /**
+   * Sets all Mode Fonctionnement endpoints back to true.
+   */
+  public async resetAllModeFonctionnement(
+    macroZoneMap: Map<SpinalNode<any>, {
+      modeFonctionnement: SpinalNode<any>;
+      regulationProfileType: string;
+      microZones: Map<SpinalNode<any>, SpinalNode<any>>;
+    }>
+  ): Promise<void> {
+    const promises: Promise<void>[] = [];
+
+    for (const [macroZone, { modeFonctionnement }] of macroZoneMap) {
+      promises.push(
+        this.setEndpointCurrentValue(modeFonctionnement, true).then(() => {
+          console.log(`  [${macroZone.getName().get()}] Mode Fonctionnement reset to true`);
+        })
+      );
+    }
+
+    await Promise.all(promises);
+    console.log('\nAll Mode Fonctionnement endpoints reset to true.');
+  }
+
+
 }
 
 function macroZoneMapLog(macroZoneMap: Map<SpinalNode<any>, {
@@ -360,31 +386,33 @@ function macroZoneMapLog(macroZoneMap: Map<SpinalNode<any>, {
 
 
 const LUX_VALUE = 1200;            // Test constant (will be calculated later)
-const STEP_INTERVAL_MS = 2000;    // Step every X ms (max 1% change per second)
+const STEP_INTERVAL_MS = 10000;    // Step every 10s
 
 /**
  * Calculates target luminosity % from lux value and regulation profile type.
  *
  * Profile 1:
  *   L < 100         => P = 70%
- *   100 <= L <= 1500 => P = -0.05 * L + 75
+ *   100 <= L <= 1500 => P =  -0.0357 * L + 73.57
  *   L > 1500        => P = 0%
  *
  * Profile 2:
  *   L < 100         => P = 70%
- *   100 <= L <= 700  => P = -(7/60) * L + (490/6)   (~-0.1167 * L + 81.667)
- *   L > 700         => P = 0%
+ *   100 <= L <= 700  => P = -0.0833 * L + 78.33
+ *   700 < L <= 1500  => P = 20%
+ *   L > 1500        => P = 0%
  */
 function calculateTargetPercent(lux: number, profileType: string): number {
   if (profileType === '1') {
     if (lux < 100) return 70;
-    if (lux > 1500) return 0;
-    return -0.05 * lux + 75;
+    if (lux <= 1500) return -0.0357 * lux + 73.57;
+    return 0;
   }
   if (profileType === '2') {
     if (lux < 100) return 70;
-    if (lux > 700) return 0;
-    return -(7 / 60) * lux + 490 / 6;
+    if (lux <= 700) return -0.0833 * lux + 78.33;
+    if (lux <= 1500) return 20;
+    return 0;
   }
   console.warn(`Unknown regulation profile type: ${profileType}, defaulting to profile 1`);
   return calculateTargetPercent(lux, '1');
@@ -402,5 +430,13 @@ async function Main() {
   console.log(`Lux: ${LUX_VALUE} | Step interval: ${STEP_INTERVAL_MS}ms (max 1%/s)\n`);
 
   await spinalMain.regulateAllMicroZones(macroZoneMap, LUX_VALUE, STEP_INTERVAL_MS);
+
+  // Schedule Mode Fonctionnement reset at 12h, 19h, and 22h
+  const resetCron = new CronJob('0 12,19,22 * * *', async () => {
+    console.log(`\n[CRON ${new Date().toLocaleTimeString()}] Resetting all Mode Fonctionnement to true...`);
+    await spinalMain.resetAllModeFonctionnement(macroZoneMap);
+  });
+  resetCron.start();
+  console.log('\nCron scheduled: Mode Fonctionnement reset at 12:00, 19:00, 22:00');
 }
 Main();
