@@ -5,13 +5,15 @@
     "outDir": "dist",
     "declaration": true,
     "declarationDir": "./declarations",
+    "rootDir": "./src",
     "sourceMap": true,
     "moduleResolution": "node",
     "removeComments": true,
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
     "resolveJsonModule": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "ignoreDeprecations": "6.0"
   },
   "include": [
     "src/**/*.ts"

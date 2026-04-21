@@ -23,80 +23,71 @@
  */
 
 import {
-  Process,
   spinalCore,
   FileSystem,
   Model,
-  BindProcess,
 } from 'spinal-core-connectorjs';
 import {
   SpinalGraphService,
   SpinalContext,
-  SpinalNodeRef,
-  SpinalNode
+  SpinalNode,
 } from 'spinal-env-viewer-graph-service';
 
-import { SpinalAttribute } from 'spinal-models-documentation';
-import { serviceDocumentation } from 'spinal-env-viewer-plugin-documentation-service';
 import { CronJob } from 'cron';
 
-
+import { logger } from './logger';
+import {
+  calculateTargetPercent,
+  macroZoneMapLog,
+  MacroZoneMap,
+} from './regulation';
+import {
+  getEndpointCurrentValue,
+  setEndpointCurrentValue,
+  getMacroZoneModeFonctionnementNode,
+  getMicroZoneValueNode,
+  getMulticapteurLuminosityEndpoint,
+} from './endpointHelpers';
 
 require('dotenv').config();
 
 
 class SpinalMain {
+  hubConnection!: FileSystem;
 
-
-  hubConnection: FileSystem;
-
-
-
-  hwCtxtMulticapteurs: SpinalContext<any>;
-  hwCtxtZones: SpinalContext<any>;
-  hwCtxtPositionsDeTravail: SpinalContext<any>;
-
-
-
+  hwCtxtMulticapteurs!: SpinalContext<any>;
+  hwCtxtZones!: SpinalContext<any>;
+  hwCtxtPositionsDeTravail!: SpinalContext<any>;
 
   constructor() { }
 
   public init() {
-
-    console.log('Done.');
-    console.log('Init connection to HUB...');
+    logger.regulation('Init connection to HUB...');
     const host = process.env.SPINALHUB_PORT
       ? `${process.env.SPINALHUB_IP}:${process.env.SPINALHUB_PORT}`
       : process.env.SPINALHUB_IP;
     const url = `${process.env.SPINALHUB_PROTOCOL}://${process.env.USER_ID}:${process.env.USER_PASSWORD}@${host}/`;
-    console.log('URL:', url);
-    console.log('Connecting to', url);
+    logger.regulation(`URL: ${url}`);
+    logger.regulation(`Connecting to ${url}`);
     const conn = spinalCore.connect(url);
     this.hubConnection = conn;
 
     return new Promise((resolve, reject) => {
       spinalCore.load(
         conn,
-        process.env.DIGITALTWIN_PATH,
+        process.env.DIGITALTWIN_PATH!,
         async (graph: any) => {
           await SpinalGraphService.setGraph(graph);
-          console.log('Done.');
+          logger.regulation('HUB connection established.');
           resolve(graph);
         },
         () => {
-          console.log(
-            'Connection failed ! Please check your config file and the state of the hub.'
-          );
+          logger.warning('Connection failed! Please check your config file and the state of the hub.');
           reject();
         }
       );
     });
-
-
-
   }
-
-
 
   async load<T extends Model>(server_id: number): Promise<T> {
     if (!server_id) {
@@ -113,36 +104,79 @@ class SpinalMain {
     }
   }
 
-
-  public async initJob() {
+  public async initJob(): Promise<MacroZoneMap | undefined> {
     const graph = SpinalGraphService.getGraph();
     const contexts = await graph.getChildren('hasContext');
 
     this.hwCtxtMulticapteurs = contexts.find(
       (ctx) => ctx.getName().get() === process.env.HARDWARE_CONTEXT_MULTICAPTEURS_NAME
-    );
+    ) as SpinalContext<any>;
     this.hwCtxtZones = contexts.find(
       (ctx) => ctx.getName().get() === process.env.HARDWARE_CONTEXT_ZONES_NAME
-    );
+    ) as SpinalContext<any>;
     this.hwCtxtPositionsDeTravail = contexts.find(
       (ctx) => ctx.getName().get() === process.env.HARDWARE_CONTEXT_POSITIONS_DE_TRAVAIL_NAME
-    );
+    ) as SpinalContext<any>;
 
     if (!this.hwCtxtMulticapteurs) {
-      console.error(`Hardware context for multicapteurs not found. Expected name: ${process.env.HARDWARE_CONTEXT_MULTICAPTEURS_NAME}`);
-      // return;
+      logger.warning(`Hardware context for multicapteurs not found. Expected name: ${process.env.HARDWARE_CONTEXT_MULTICAPTEURS_NAME}`);
     }
     if (!this.hwCtxtZones) {
-      console.error(`Hardware context for zones not found. Expected name: ${process.env.HARDWARE_CONTEXT_ZONES_NAME}`);
+      logger.warning(`Hardware context for zones not found. Expected name: ${process.env.HARDWARE_CONTEXT_ZONES_NAME}`);
       return;
     }
     if (!this.hwCtxtPositionsDeTravail) {
-      console.error(`Hardware context for positions de travail not found. Expected name: ${process.env.HARDWARE_CONTEXT_POSITIONS_DE_TRAVAIL_NAME}`);
+      logger.warning(`Hardware context for positions de travail not found. Expected name: ${process.env.HARDWARE_CONTEXT_POSITIONS_DE_TRAVAIL_NAME}`);
       return;
     }
 
-
     const hwCtxtZones_levels = await this.hwCtxtZones.getChildrenInContext(this.hwCtxtZones);
+    const hwCtxtMulticapteurs_levels = await this.hwCtxtMulticapteurs.getChildrenInContext(this.hwCtxtMulticapteurs);
+
+    // Build lookup: macroZone name -> { regulationProfileType, luminosityEndpoints } by traversing
+    // hwCtxtMulticapteurs: level -> "jour-1"/"jour-2" (profile type) -> macroZone -> multicapteur -> luminosity endpoint.
+    const multicapteurInfoByMacroZoneName = new Map<string, {
+      regulationProfileType: string;
+      luminosityEndpoints: SpinalNode<any>[];
+    }>();
+
+    await Promise.all(hwCtxtMulticapteurs_levels.map(async (level: SpinalNode<any>) => {
+      const profileNodes = await level.getChildrenInContext(this.hwCtxtMulticapteurs);
+      await Promise.all(profileNodes.map(async (profileNode: SpinalNode<any>) => {
+        const profileName = profileNode.getName().get();
+        let regulationProfileType: string;
+        if (profileName === 'jour-1') regulationProfileType = '1';
+        else if (profileName === 'jour-2') regulationProfileType = '2';
+        else {
+          logger.warning(`Unknown profile node "${profileName}" under level "${level.getName().get()}" in hwCtxtMulticapteurs (expected "jour-1" or "jour-2"). Skipping.`);
+          return;
+        }
+
+        const mcMacroZones = await profileNode.getChildrenInContext(this.hwCtxtMulticapteurs);
+        await Promise.all(mcMacroZones.map(async (mcMacroZone: SpinalNode<any>) => {
+          const mcMacroZoneName = mcMacroZone.getName().get();
+          const multicapteurs = await mcMacroZone.getChildrenInContext(this.hwCtxtMulticapteurs);
+
+          const luminosityEndpoints: SpinalNode<any>[] = [];
+          await Promise.all(multicapteurs.map(async (multicapteur: SpinalNode<any>) => {
+            const lumEndpoint = await getMulticapteurLuminosityEndpoint(multicapteur);
+            if (!lumEndpoint) {
+              logger.warning(`No "Mesure_lux" endpoint found for multicapteur ${multicapteur.getName().get()} (id: ${multicapteur._server_id}) under macroZone "${mcMacroZoneName}"`);
+              return;
+            }
+            luminosityEndpoints.push(lumEndpoint);
+          }));
+
+          if (multicapteurInfoByMacroZoneName.has(mcMacroZoneName)) {
+            logger.warning(`Duplicate macroZone "${mcMacroZoneName}" in hwCtxtMulticapteurs — overwriting previous entry.`);
+          }
+          multicapteurInfoByMacroZoneName.set(mcMacroZoneName, {
+            regulationProfileType,
+            luminosityEndpoints,
+          });
+        }));
+      }));
+    }));
 
     // Fetch gateways from all levels in parallel
     const gatewayArrays = await Promise.all(
@@ -156,99 +190,45 @@ class SpinalMain {
     );
     const hwCtxtZones_macroZones = macroZoneArrays.flat();
 
-    // Map: macroZone -> { modeFonctionnement endpoint, regulationProfileType, Map: microZone -> microZone endpoint }
-    const macroZoneMap = new Map<SpinalNode<any>, {
-      modeFonctionnement: SpinalNode<any>;
-      regulationProfileType: string;
-      microZones: Map<SpinalNode<any>, SpinalNode<any>>;
-    }>();
+    const macroZoneMap: MacroZoneMap = new Map();
 
-    // Process all macroZones in parallel
-    await Promise.all(hwCtxtZones_macroZones.map(async (macroZone) => {
-      const [microZones, modeFonctionnement, regulationProfileType] = await Promise.all([
+    await Promise.all(hwCtxtZones_macroZones.map(async (macroZone: SpinalNode<any>) => {
+      const [microZones, modeFonctionnement] = await Promise.all([
         macroZone.getChildrenInContext(this.hwCtxtZones),
-        this.getMacroZoneModeFonctionnementNode(macroZone),
-        this.getMacroZoneRegulationProfileType(macroZone),
+        getMacroZoneModeFonctionnementNode(macroZone),
       ]);
-      if (!modeFonctionnement || !regulationProfileType) {
-        console.warn(`No "Mode fonctionnement" endpoint or regulationProfileType found  for macroZone ${macroZone.getName().get()} (id: ${macroZone._server_id})`);
+      if (!modeFonctionnement) {
+        logger.warning(`No "Mode fonctionnement" endpoint found for macroZone ${macroZone.getName().get()} (id: ${macroZone._server_id})`);
         return;
+      }
+
+      const macroZoneName = macroZone.getName().get();
+      const mcInfo = multicapteurInfoByMacroZoneName.get(macroZoneName);
+      if (!mcInfo) {
+        logger.warning(`MacroZone "${macroZoneName}" not found in hwCtxtMulticapteurs. Keeping with empty luminosityEndpoints and undefined regulationProfileType.`);
       }
 
       // Fetch all microZone endpoints in parallel
       const microZoneEndpoints = new Map<SpinalNode<any>, SpinalNode<any>>();
-      await Promise.all(microZones.map(async (microZone) => {
-        const valueEndpoint = await this.getMicroZoneValueNode(microZone);
+      await Promise.all(microZones.map(async (microZone: SpinalNode<any>) => {
+        const valueEndpoint = await getMicroZoneValueNode(microZone);
         if (!valueEndpoint) {
-          console.warn(`No "Value" endpoint found for microZone ${microZone.getName().get()} (id: ${microZone._server_id}) under macroZone ${macroZone.getName().get()}`);
+          logger.warning(`No "Value" endpoint found for microZone ${microZone.getName().get()} (id: ${microZone._server_id}) under macroZone ${macroZone.getName().get()}`);
           return;
         }
         microZoneEndpoints.set(microZone, valueEndpoint);
-        // By the way , endpoints under microzones are shared between the different instances of the same microzone in different contexts :)
+        // By the way, endpoints under microzones are shared between the different instances of the same microzone in different contexts :)
       }));
 
       macroZoneMap.set(macroZone, {
         modeFonctionnement,
-        regulationProfileType,
+        regulationProfileType: mcInfo?.regulationProfileType,
+        luminosityEndpoints: mcInfo?.luminosityEndpoints ?? [],
         microZones: microZoneEndpoints,
       });
     }));
 
     return macroZoneMap;
-  }
-
-
-  private async getMacroZoneModeFonctionnementNode(macroZone: SpinalNode<any>): Promise<SpinalNode<any> | undefined> {
-    const firstLevelEndpoints = await macroZone.getChildren('hasBmsEndpoint');
-    const firstEndpointLevel = firstLevelEndpoints.find(ep => ep.getName().get() === macroZone.getName().get());
-    if (!firstEndpointLevel) {
-      return undefined;
-    }
-
-    const secondLevelEndpoints = await firstEndpointLevel.getChildren('hasBmsEndpoint');
-    const modeFonctionnement = secondLevelEndpoints.find(ep => ep.getName().get() === 'Mode fonctionnement');
-    return modeFonctionnement || undefined;
-  }
-
-  private async getMacroZoneRegulationProfileType(macroZone: SpinalNode<any>): Promise<string> {
-    let regulationProfileType = undefined;
-    const attr = await serviceDocumentation.findOneAttributeInCategory(
-      macroZone,
-      'default',
-      'RegulationProfileType'
-    );
-    if (attr !== -1) {
-      regulationProfileType = attr.value.get();
-      return regulationProfileType;
-    }
-    else {
-      return Math.random() < 0.5 ? '1' : '2'; // Default to random if not found
-    }
-  }
-
-
-  private async getMicroZoneValueNode(microZone: SpinalNode<any>): Promise<SpinalNode<any> | undefined> {
-    const firstLevelEndpoints = await microZone.getChildren('hasBmsEndpoint');
-    const firstEndpointLevel = firstLevelEndpoints.find(ep => ep.getName().get() === microZone.getName().get());
-    if (!firstEndpointLevel) {
-      return undefined;
-    }
-
-    const secondLevelEndpoints = await firstEndpointLevel.getChildren('hasBmsEndpoint');
-    const valueEndpoint = secondLevelEndpoints.find(ep => ep.getName().get() === 'Value');
-    return valueEndpoint || undefined;
-  }
-
-
-  private async setEndpointCurrentValue(endpoint: SpinalNode<any>, value: any) {
-    const element = await endpoint.element.load();
-    const currentValue = element.currentValue;
-    currentValue.set(value);
-  }
-
-  private async getEndpointCurrentValue(endpoint: SpinalNode<any>): Promise<any> {
-    const element = await endpoint.element.load();
-    return element.currentValue.get();
   }
 
 
@@ -263,18 +243,18 @@ class SpinalMain {
     targetPercent: number,
     stepIntervalMs: number
   ): Promise<void> {
-    const rawValue = await this.getEndpointCurrentValue(endpoint);
+    const rawValue = await getEndpointCurrentValue(endpoint);
     const currentValue = Number(rawValue);
 
     if (isNaN(currentValue)) {
-      console.warn(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Current value is not a number (${rawValue}). Skipping.`);
+      logger.warning(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Current value is not a number (${rawValue}). Skipping.`);
       return;
     }
 
     const diff = targetPercent - currentValue;
 
     if (Math.abs(diff) < 0.01) {
-      console.log(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Already at target (${currentValue}%). Skipping.`);
+      logger.regulation(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Already at target (${currentValue}%). Skipping.`);
       return;
     }
 
@@ -282,7 +262,7 @@ class SpinalMain {
     const maxStepSize = stepIntervalMs / 1000; // 1% per second => e.g. 10% per 10s
     const totalSteps = Math.ceil(Math.abs(diff) / maxStepSize);
 
-    console.log(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Current: ${currentValue}% -> Target: ${targetPercent}% | ${totalSteps} steps of ${direction > 0 ? '+' : '-'}${maxStepSize}% every ${stepIntervalMs}ms`);
+    logger.regulation(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Current: ${currentValue}% -> Target: ${targetPercent}% | ${totalSteps} steps of ${direction > 0 ? '+' : '-'}${maxStepSize}% every ${stepIntervalMs}ms`);
 
     return new Promise((resolve) => {
       let step = 0;
@@ -293,12 +273,12 @@ class SpinalMain {
           ? targetPercent
           : Math.round(projected * 100) / 100;
 
-        await this.setEndpointCurrentValue(endpoint, newValue);
-        console.log(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Step ${step}/${totalSteps} -> ${newValue}%`);
+        await setEndpointCurrentValue(endpoint, newValue);
+        logger.regulation(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Step ${step}/${totalSteps} -> ${newValue}%`);
 
         if (step >= totalSteps) {
           clearInterval(interval);
-          console.log(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Reached target ${targetPercent}%`);
+          logger.regulation(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Reached target ${targetPercent}%`);
           resolve();
         }
       }, stepIntervalMs);
@@ -311,19 +291,42 @@ class SpinalMain {
    * All microzones ramp up in parallel.
    */
   public async regulateAllMicroZones(
-    macroZoneMap: Map<SpinalNode<any>, {
-      modeFonctionnement: SpinalNode<any>;
-      regulationProfileType: string;
-      microZones: Map<SpinalNode<any>, SpinalNode<any>>;
-    }>,
-    lux: number,
+    macroZoneMap: MacroZoneMap,
     stepIntervalMs: number
   ): Promise<void> {
     const promises: Promise<void>[] = [];
+    const testMode = process.env.TEST_MODE === '1';
 
-    for (const [macroZone, { regulationProfileType, microZones }] of macroZoneMap) {
-      const targetPercent = calculateTargetPercent(lux, regulationProfileType);
-      console.log(`\nRegulating MacroZone: ${macroZone.getName().get()} (profile ${regulationProfileType}) -> target: ${targetPercent.toFixed(1)}%`);
+    for (const [macroZone, { modeFonctionnement, regulationProfileType, luminosityEndpoints, microZones }] of macroZoneMap) {
+      if (!testMode) { // if test mode is enabled, ignore Mode Fonctionnement value and regulate all microzones to test the regulation process
+        const modeFonctionnementValue = await getEndpointCurrentValue(modeFonctionnement);
+        if (modeFonctionnementValue !== true) {
+          logger.warning(`\nSkipping MacroZone: ${macroZone.getName().get()} - Mode Fonctionnement is not true (value: ${modeFonctionnementValue})`);
+          continue;
+        }
+      }
+
+      if (!regulationProfileType) {
+        logger.warning(`\nSkipping MacroZone: ${macroZone.getName().get()} - no regulationProfileType (not found in hwCtxtMulticapteurs).`);
+        continue;
+      }
+
+      if (luminosityEndpoints.length === 0) {
+        logger.warning(`\nSkipping MacroZone: ${macroZone.getName().get()} - no luminosity endpoints available.`);
+        continue;
+      }
+
+      // Compute average lux from the macrozone's multicapteur luminosity endpoints.
+      const rawLuxValues = await Promise.all(luminosityEndpoints.map(ep => getEndpointCurrentValue(ep)));
+      const numericLuxValues = rawLuxValues.map(v => Number(v)).filter(v => !isNaN(v));
+      if (numericLuxValues.length === 0) {
+        logger.warning(`\nSkipping MacroZone: ${macroZone.getName().get()} - no valid lux readings from ${luminosityEndpoints.length} sensor(s).`);
+        continue;
+      }
+      const avgLux = numericLuxValues.reduce((a, b) => a + b, 0) / numericLuxValues.length;
+
+      const targetPercent = calculateTargetPercent(avgLux, regulationProfileType);
+      logger.regulation(`\nRegulating MacroZone: ${macroZone.getName().get()} (profile ${regulationProfileType}) | avg lux: ${avgLux.toFixed(1)} (${numericLuxValues.length}/${luminosityEndpoints.length} sensors) -> target: ${targetPercent.toFixed(1)}%`);
       for (const [microZone, endpoint] of microZones) {
         promises.push(
           this.regulateMicroZone(endpoint, microZone.getName().get(), targetPercent, stepIntervalMs)
@@ -332,111 +335,55 @@ class SpinalMain {
     }
 
     await Promise.all(promises);
-    console.log('\nAll microzones regulation complete.');
+    logger.regulation('\nAll microzones regulation complete.');
   }
 
 
   /**
    * Sets all Mode Fonctionnement endpoints back to true.
    */
-  public async resetAllModeFonctionnement(
-    macroZoneMap: Map<SpinalNode<any>, {
-      modeFonctionnement: SpinalNode<any>;
-      regulationProfileType: string;
-      microZones: Map<SpinalNode<any>, SpinalNode<any>>;
-    }>
-  ): Promise<void> {
+  public async resetAllModeFonctionnement(macroZoneMap: MacroZoneMap): Promise<void> {
     const promises: Promise<void>[] = [];
 
     for (const [macroZone, { modeFonctionnement }] of macroZoneMap) {
       promises.push(
-        this.setEndpointCurrentValue(modeFonctionnement, true).then(() => {
-          console.log(`  [${macroZone.getName().get()}] Mode Fonctionnement reset to true`);
+        setEndpointCurrentValue(modeFonctionnement, true).then(() => {
+          logger.regulation(`  [${macroZone.getName().get()}] Mode Fonctionnement reset to true`);
         })
       );
     }
 
     await Promise.all(promises);
-    console.log('\nAll Mode Fonctionnement endpoints reset to true.');
+    logger.regulation('\nAll Mode Fonctionnement endpoints reset to true.');
   }
-
-
-}
-
-function macroZoneMapLog(macroZoneMap: Map<SpinalNode<any>, {
-  modeFonctionnement: SpinalNode<any>;
-  regulationProfileType: string;
-
-  microZones: Map<SpinalNode<any>, SpinalNode<any>>;
-}>) {
-  console.log('\n========== MacroZone Map ==========\n');
-  for (const [macroZone, { modeFonctionnement, regulationProfileType, microZones }] of macroZoneMap) {
-    console.log(`MacroZone: ${macroZone.getName().get()}`);
-    console.log(`  └─ Mode Fonctionnement: ${modeFonctionnement.getName().get()}`);
-    console.log(`  └─ Regulation Profile Type: ${regulationProfileType}`);
-    console.log(`  └─ MicroZones (${microZones.size}):`);
-    for (const [microZone, endpoint] of microZones) {
-      console.log(`      ├─ ${microZone.getName().get()} -> endpoint: ${endpoint.getName().get()} | ${endpoint._server_id}`);
-    }
-    console.log('');
-  }
-  console.log(`Total: ${macroZoneMap.size} macrozones`);
 }
 
 
-
-const LUX_VALUE = 1200;            // Test constant (will be calculated later)
 const STEP_INTERVAL_MS = 10000;    // Step every 10s
-
-/**
- * Calculates target luminosity % from lux value and regulation profile type.
- *
- * Profile 1:
- *   L < 100         => P = 70%
- *   100 <= L <= 1500 => P =  -0.0357 * L + 73.57
- *   L > 1500        => P = 0%
- *
- * Profile 2:
- *   L < 100         => P = 70%
- *   100 <= L <= 700  => P = -0.0833 * L + 78.33
- *   700 < L <= 1500  => P = 20%
- *   L > 1500        => P = 0%
- */
-function calculateTargetPercent(lux: number, profileType: string): number {
-  if (profileType === '1') {
-    if (lux < 100) return 70;
-    if (lux <= 1500) return -0.0357 * lux + 73.57;
-    return 0;
-  }
-  if (profileType === '2') {
-    if (lux < 100) return 70;
-    if (lux <= 700) return -0.0833 * lux + 78.33;
-    if (lux <= 1500) return 20;
-    return 0;
-  }
-  console.warn(`Unknown regulation profile type: ${profileType}, defaulting to profile 1`);
-  return calculateTargetPercent(lux, '1');
-}
 
 async function Main() {
   const spinalMain = new SpinalMain();
-  const graph = await spinalMain.init();
+  await spinalMain.init();
 
   const macroZoneMap = await spinalMain.initJob();
+  if (!macroZoneMap) {
+    logger.warning('Failed to initialize job: macroZoneMap is undefined.');
+    return;
+  }
 
   macroZoneMapLog(macroZoneMap);
 
-  console.log(`\n========== Starting Luminosity Regulation ==========`);
-  console.log(`Lux: ${LUX_VALUE} | Step interval: ${STEP_INTERVAL_MS}ms (max 1%/s)\n`);
+  logger.regulation('\n========== Starting Luminosity Regulation ==========');
+  logger.regulation(`Step interval: ${STEP_INTERVAL_MS}ms (max 1%/s) | Lux computed per-macrozone from multicapteurs\n`);
 
-  await spinalMain.regulateAllMicroZones(macroZoneMap, LUX_VALUE, STEP_INTERVAL_MS);
+  await spinalMain.regulateAllMicroZones(macroZoneMap, STEP_INTERVAL_MS);
 
   // Schedule Mode Fonctionnement reset at 12h, 19h, and 22h
   const resetCron = new CronJob('0 12,19,22 * * *', async () => {
-    console.log(`\n[CRON ${new Date().toLocaleTimeString()}] Resetting all Mode Fonctionnement to true...`);
+    logger.regulation(`\n[CRON ${new Date().toLocaleTimeString()}] Resetting all Mode Fonctionnement to true...`);
     await spinalMain.resetAllModeFonctionnement(macroZoneMap);
   });
   resetCron.start();
-  console.log('\nCron scheduled: Mode Fonctionnement reset at 12:00, 19:00, 22:00');
+  logger.regulation('\nCron scheduled: Mode Fonctionnement reset at 12:00, 19:00, 22:00');
 }
 Main();
