@@ -151,91 +151,6 @@ class SpinalMain {
             return macroZoneMap;
         });
     }
-    regulateMicroZone(endpoint, microZoneName, targetPercent, stepIntervalMs) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const rawValue = yield (0, endpointHelpers_1.getEndpointCurrentValue)(endpoint);
-            const currentValue = Number(rawValue);
-            if (isNaN(currentValue)) {
-                logger_1.logger.warning(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Current value is not a number (${rawValue}). Skipping.`);
-                return;
-            }
-            const diff = targetPercent - currentValue;
-            if (Math.abs(diff) < 0.01) {
-                logger_1.logger.regulation(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Already at target (${currentValue}%). Skipping.`);
-                return;
-            }
-            const direction = diff > 0 ? 1 : -1;
-            const maxStepSize = stepIntervalMs / 1000;
-            const totalSteps = Math.ceil(Math.abs(diff) / maxStepSize);
-            logger_1.logger.regulation(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Current: ${currentValue}% -> Target: ${targetPercent}% | ${totalSteps} steps of ${direction > 0 ? '+' : '-'}${maxStepSize}% every ${stepIntervalMs}ms`);
-            return new Promise((resolve) => {
-                let step = 0;
-                const interval = setInterval(() => __awaiter(this, void 0, void 0, function* () {
-                    step++;
-                    const projected = currentValue + direction * maxStepSize * step;
-                    const newValue = Math.abs(targetPercent - projected) < maxStepSize
-                        ? targetPercent
-                        : Math.round(projected * 100) / 100;
-                    yield (0, endpointHelpers_1.setEndpointCurrentValue)(endpoint, newValue);
-                    logger_1.logger.regulation(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Step ${step}/${totalSteps} -> ${newValue}%`);
-                    if (step >= totalSteps) {
-                        clearInterval(interval);
-                        logger_1.logger.regulation(`  [${microZoneName}] [${endpoint.getName().get()} | ${endpoint._server_id}] Reached target ${targetPercent}%`);
-                        resolve();
-                    }
-                }), stepIntervalMs);
-            });
-        });
-    }
-    regulateAllMicroZones(macroZoneMap, stepIntervalMs) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const promises = [];
-            const testMode = process.env.TEST_MODE === '1';
-            for (const [macroZone, { modeFonctionnement, regulationProfileType, luminosityEndpoints, microZones }] of macroZoneMap) {
-                if (!testMode) {
-                    const modeFonctionnementValue = yield (0, endpointHelpers_1.getEndpointCurrentValue)(modeFonctionnement);
-                    if (modeFonctionnementValue !== true) {
-                        logger_1.logger.warning(`\nSkipping MacroZone: ${macroZone.getName().get()} - Mode Fonctionnement is not true (value: ${modeFonctionnementValue})`);
-                        continue;
-                    }
-                }
-                if (!regulationProfileType) {
-                    logger_1.logger.warning(`\nSkipping MacroZone: ${macroZone.getName().get()} - no regulationProfileType (not found in hwCtxtMulticapteurs).`);
-                    continue;
-                }
-                if (luminosityEndpoints.length === 0) {
-                    logger_1.logger.warning(`\nSkipping MacroZone: ${macroZone.getName().get()} - no luminosity endpoints available.`);
-                    continue;
-                }
-                const rawLuxValues = yield Promise.all(luminosityEndpoints.map(ep => (0, endpointHelpers_1.getEndpointCurrentValue)(ep)));
-                const numericLuxValues = rawLuxValues.map(v => Number(v)).filter(v => !isNaN(v));
-                if (numericLuxValues.length === 0) {
-                    logger_1.logger.warning(`\nSkipping MacroZone: ${macroZone.getName().get()} - no valid lux readings from ${luminosityEndpoints.length} sensor(s).`);
-                    continue;
-                }
-                const avgLux = numericLuxValues.reduce((a, b) => a + b, 0) / numericLuxValues.length;
-                const targetPercent = (0, regulation_1.calculateTargetPercent)(avgLux, regulationProfileType);
-                logger_1.logger.regulation(`\nRegulating MacroZone: ${macroZone.getName().get()} (profile ${regulationProfileType}) | avg lux: ${avgLux.toFixed(1)} (${numericLuxValues.length}/${luminosityEndpoints.length} sensors) -> target: ${targetPercent.toFixed(1)}%`);
-                for (const [microZone, endpoint] of microZones) {
-                    promises.push(this.regulateMicroZone(endpoint, microZone.getName().get(), targetPercent, stepIntervalMs));
-                }
-            }
-            yield Promise.all(promises);
-            logger_1.logger.regulation('\nAll microzones regulation complete.');
-        });
-    }
-    resetAllModeFonctionnement(macroZoneMap) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const promises = [];
-            for (const [macroZone, { modeFonctionnement }] of macroZoneMap) {
-                promises.push((0, endpointHelpers_1.setEndpointCurrentValue)(modeFonctionnement, true).then(() => {
-                    logger_1.logger.regulation(`  [${macroZone.getName().get()}] Mode Fonctionnement reset to true`);
-                }));
-            }
-            yield Promise.all(promises);
-            logger_1.logger.regulation('\nAll Mode Fonctionnement endpoints reset to true.');
-        });
-    }
 }
 const STEP_INTERVAL_MS = 10000;
 function Main() {
@@ -248,15 +163,14 @@ function Main() {
             return;
         }
         (0, regulation_1.macroZoneMapLog)(macroZoneMap);
-        logger_1.logger.regulation('\n========== Starting Luminosity Regulation ==========');
-        logger_1.logger.regulation(`Step interval: ${STEP_INTERVAL_MS}ms (max 1%/s) | Lux computed per-macrozone from multicapteurs\n`);
-        yield spinalMain.regulateAllMicroZones(macroZoneMap, STEP_INTERVAL_MS);
         const resetCron = new cron_1.CronJob('0 12,19,22 * * *', () => __awaiter(this, void 0, void 0, function* () {
-            logger_1.logger.regulation(`\n[CRON ${new Date().toLocaleTimeString()}] Resetting all Mode Fonctionnement to true...`);
-            yield spinalMain.resetAllModeFonctionnement(macroZoneMap);
+            logger_1.logger.regulation(`\n[CRON ${new Date().toLocaleTimeString()}] Resetting all Mode Fonctionnement to false...`);
+            yield (0, regulation_1.resetAllModeFonctionnement)(macroZoneMap);
         }));
         resetCron.start();
         logger_1.logger.regulation('\nCron scheduled: Mode Fonctionnement reset at 12:00, 19:00, 22:00');
+        logger_1.logger.regulation('\n========== Starting Luminosity Regulation ==========');
+        yield (0, regulation_1.startRegulationLoop)(macroZoneMap, STEP_INTERVAL_MS);
     });
 }
 Main();
