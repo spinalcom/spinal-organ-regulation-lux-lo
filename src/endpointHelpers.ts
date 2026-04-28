@@ -1,4 +1,6 @@
 import { SpinalNode } from 'spinal-env-viewer-graph-service';
+import { attributeService } from 'spinal-env-viewer-plugin-documentation-service'
+import { SpinalAttribute } from 'spinal-models-documentation';
 
 export async function setEndpointCurrentValue(endpoint: SpinalNode<any>, value: any): Promise<void> {
   const element = await endpoint.element!.load();
@@ -36,4 +38,16 @@ export async function getMulticapteurLuminosityEndpoint(multicapteur: SpinalNode
   // Assuming there's only one first-level endpoint under the multicapteur
   const secondLevelEndpoints = await firstLevelEndpoints[0].getChildren('hasBmsEndpoint');
   return secondLevelEndpoints.find(ep => ep.getName().get() === 'Mesure_lux') || undefined;
+}
+
+export async function getOrCreateMicroZoneModeAttributeModel(microZone: SpinalNode<any>): Promise<SpinalAttribute | undefined> {
+  const attribute = await attributeService.findOneAttributeInCategory(microZone, 'default', 'mode');
+  if (attribute != -1) {
+    return attribute
+  }
+  const newAttribute = await attributeService.addAttributeByCategoryName(microZone, 'default', 'mode', 'auto');
+  // the manual mode is set by another program that is in charge of setting the mode to 'manual' when the occupant changes it, 
+  // so we set it to 'auto' by default
+
+  return newAttribute;
 }

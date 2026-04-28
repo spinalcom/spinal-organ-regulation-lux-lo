@@ -46,7 +46,9 @@ import {
   getMacroZoneModeFonctionnementNode,
   getMicroZoneValueNode,
   getMulticapteurLuminosityEndpoint,
+  getOrCreateMicroZoneModeAttributeModel,
 } from './endpointHelpers';
+import { MicroZoneInfo } from './regulation';
 
 require('dotenv').config();
 
@@ -207,15 +209,22 @@ class SpinalMain {
         logger.warning(`MacroZone "${macroZoneName}" not found in hwCtxtMulticapteurs. Keeping with empty luminosityEndpoints and undefined regulationProfileType.`);
       }
 
-      // Fetch all microZone endpoints in parallel
-      const microZoneEndpoints = new Map<SpinalNode<any>, SpinalNode<any>>();
+      // Fetch all microZone value endpoints + mode attributes in parallel
+      const microZoneInfos = new Map<SpinalNode<any>, MicroZoneInfo>();
       await Promise.all(microZones.map(async (microZone: SpinalNode<any>) => {
-        const valueEndpoint = await getMicroZoneValueNode(microZone);
+        const [valueEndpoint, modeAttribute] = await Promise.all([
+          getMicroZoneValueNode(microZone),
+          getOrCreateMicroZoneModeAttributeModel(microZone),
+        ]);
         if (!valueEndpoint) {
           logger.warning(`No "Value" endpoint found for microZone ${microZone.getName().get()} (id: ${microZone._server_id}) under macroZone ${macroZone.getName().get()}`);
           return;
         }
-        microZoneEndpoints.set(microZone, valueEndpoint);
+        if (!modeAttribute) {
+          logger.warning(`No "mode" attribute available for microZone ${microZone.getName().get()} (id: ${microZone._server_id}) under macroZone ${macroZone.getName().get()}; skipping.`);
+          return;
+        }
+        microZoneInfos.set(microZone, { valueEndpoint, modeAttribute });
         // By the way, endpoints under microzones are shared between the different instances of the same microzone in different contexts :)
       }));
 
@@ -223,7 +232,7 @@ class SpinalMain {
         modeFonctionnement,
         regulationProfileType: mcInfo?.regulationProfileType,
         luminosityEndpoints: mcInfo?.luminosityEndpoints ?? [],
-        microZones: microZoneEndpoints,
+        microZones: microZoneInfos,
       });
     }));
 

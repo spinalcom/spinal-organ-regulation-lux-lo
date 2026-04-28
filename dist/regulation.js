@@ -52,8 +52,8 @@ function macroZoneMapLog(macroZoneMap) {
             logger_1.logger.map(`      ├─ ${ep.getName().get()} | ${ep._server_id}`);
         }
         logger_1.logger.map(`  └─ MicroZones (${microZones.size}):`);
-        for (const [microZone, endpoint] of microZones) {
-            logger_1.logger.map(`      ├─ ${microZone.getName().get()} -> endpoint: ${endpoint.getName().get()} | ${endpoint._server_id}`);
+        for (const [microZone, { valueEndpoint, modeAttribute }] of microZones) {
+            logger_1.logger.map(`      ├─ ${microZone.getName().get()} -> endpoint: ${valueEndpoint.getName().get()} | ${valueEndpoint._server_id} | mode=${modeAttribute.value.get()}`);
         }
         logger_1.logger.map('');
     }
@@ -103,7 +103,7 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
         const maxStepSize = (stepIntervalMs / 1000) * MAX_RAMP_PERCENT_PER_SECOND;
         for (const [macroZone, entry] of macroZoneMap) {
             const state = states.get(macroZone);
-            const macroZoneName = macroZone.getName().get();
+            const macroZoneTag = `${macroZone.getName().get()} | mz ${macroZone._server_id}`;
             if (!testMode) {
                 const mfValue = yield (0, endpointHelpers_1.getEndpointCurrentValue)(entry.modeFonctionnement);
                 if (mfValue !== true)
@@ -121,24 +121,32 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
             if (isFirst || luxMoved) {
                 const newTarget = calculateTargetPercent(avgLux, entry.regulationProfileType);
                 const prev = state.lastAppliedAvgLux === null ? 'n/a' : state.lastAppliedAvgLux.toFixed(1);
-                logger_1.logger.regulation(`\n[${macroZoneName}] avg lux: ${avgLux.toFixed(1)} (prev ${prev}) | profile ${entry.regulationProfileType} -> target ${newTarget}%`);
+                logger_1.logger.regulation(`\n[${macroZoneTag}] avg lux: ${avgLux.toFixed(1)} (prev ${prev}) | profile ${entry.regulationProfileType} -> target ${newTarget}%`);
                 state.lastAppliedAvgLux = avgLux;
-                for (const [microZone, endpoint] of entry.microZones) {
-                    state.microZoneTargets.set(microZone, { endpoint, targetPercent: newTarget });
+                for (const microZone of entry.microZones.keys()) {
+                    state.microZoneTargets.set(microZone, { targetPercent: newTarget });
                 }
             }
             if (state.microZoneTargets.size === 0)
                 continue;
             yield Promise.all([...state.microZoneTargets].map(([microZone, ramp]) => __awaiter(this, void 0, void 0, function* () {
-                const current = Number(yield (0, endpointHelpers_1.getEndpointCurrentValue)(ramp.endpoint));
+                const info = entry.microZones.get(microZone);
+                if (!info) {
+                    state.microZoneTargets.delete(microZone);
+                    return;
+                }
+                if (!testMode && info.modeAttribute.value.get() !== 'auto')
+                    return;
+                const microZoneTag = `[${macroZoneTag}] [${microZone.getName().get()} | mz ${microZone._server_id} | ep ${info.valueEndpoint._server_id}]`;
+                const current = Number(yield (0, endpointHelpers_1.getEndpointCurrentValue)(info.valueEndpoint));
                 if (isNaN(current)) {
-                    logger_1.logger.warning(`  [${microZone.getName().get()}] current value not numeric; dropping from ramp.`);
+                    logger_1.logger.warning(`  ${microZoneTag} current value not numeric; dropping from ramp.`);
                     state.microZoneTargets.delete(microZone);
                     return;
                 }
                 const diff = ramp.targetPercent - current;
                 if (Math.abs(diff) < 0.01) {
-                    logger_1.logger.regulation(`  [${microZone.getName().get()}] reached target ${ramp.targetPercent}%`);
+                    logger_1.logger.regulation(`  ${microZoneTag} reached target ${ramp.targetPercent}%`);
                     state.microZoneTargets.delete(microZone);
                     return;
                 }
@@ -146,8 +154,8 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
                 const newValue = Math.abs(diff) <= maxStepSize
                     ? ramp.targetPercent
                     : Math.round((current + direction * maxStepSize) * 100) / 100;
-                yield (0, endpointHelpers_1.setEndpointCurrentValue)(ramp.endpoint, newValue);
-                logger_1.logger.regulation(`  [${microZone.getName().get()}] ${current}% -> ${newValue}% (target ${ramp.targetPercent}%)`);
+                yield (0, endpointHelpers_1.setEndpointCurrentValue)(info.valueEndpoint, newValue);
+                logger_1.logger.regulation(`  ${microZoneTag} ${current}% -> ${newValue}% (target ${ramp.targetPercent}%)`);
             })));
         }
     });

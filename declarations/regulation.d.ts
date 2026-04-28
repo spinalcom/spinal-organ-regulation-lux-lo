@@ -1,9 +1,14 @@
 import { SpinalNode } from 'spinal-env-viewer-graph-service';
+import { SpinalAttribute } from 'spinal-models-documentation';
+export type MicroZoneInfo = {
+    valueEndpoint: SpinalNode<any>;
+    modeAttribute: SpinalAttribute;
+};
 export type MacroZoneEntry = {
     modeFonctionnement: SpinalNode<any>;
     regulationProfileType: string | undefined;
     luminosityEndpoints: SpinalNode<any>[];
-    microZones: Map<SpinalNode<any>, SpinalNode<any>>;
+    microZones: Map<SpinalNode<any>, MicroZoneInfo>;
 };
 export type MacroZoneMap = Map<SpinalNode<any>, MacroZoneEntry>;
 export declare function calculateTargetPercent(lux: number, profileType: string): number;

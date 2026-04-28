@@ -1,12 +1,18 @@
 import { SpinalNode } from 'spinal-env-viewer-graph-service';
+import { SpinalAttribute } from 'spinal-models-documentation';
 import { logger } from './logger';
 import { getEndpointCurrentValue, setEndpointCurrentValue } from './endpointHelpers';
+
+export type MicroZoneInfo = {
+  valueEndpoint: SpinalNode<any>;
+  modeAttribute: SpinalAttribute;
+};
 
 export type MacroZoneEntry = {
   modeFonctionnement: SpinalNode<any>;
   regulationProfileType: string | undefined;
   luminosityEndpoints: SpinalNode<any>[];
-  microZones: Map<SpinalNode<any>, SpinalNode<any>>;
+  microZones: Map<SpinalNode<any>, MicroZoneInfo>;
 };
 
 export type MacroZoneMap = Map<SpinalNode<any>, MacroZoneEntry>;
@@ -14,7 +20,7 @@ export type MacroZoneMap = Map<SpinalNode<any>, MacroZoneEntry>;
 const LUX_UPDATE_THRESHOLD = 50;       // Retarget when avg lux moves more than this vs the lux that drove the last retarget.
 const MAX_RAMP_PERCENT_PER_SECOND = 1; // Cap on ramp speed (applies to each microzone).
 
-type MicroZoneRamp = { endpoint: SpinalNode<any>; targetPercent: number };
+type MicroZoneRamp = { targetPercent: number };
 
 type MacroZoneRegulationState = {
   lastAppliedAvgLux: number | null;
@@ -64,8 +70,8 @@ export function macroZoneMapLog(macroZoneMap: MacroZoneMap) {
       logger.map(`      ├─ ${ep.getName().get()} | ${ep._server_id}`);
     }
     logger.map(`  └─ MicroZones (${microZones.size}):`);
-    for (const [microZone, endpoint] of microZones) {
-      logger.map(`      ├─ ${microZone.getName().get()} -> endpoint: ${endpoint.getName().get()} | ${endpoint._server_id}`);
+    for (const [microZone, { valueEndpoint, modeAttribute }] of microZones) {
+      logger.map(`      ├─ ${microZone.getName().get()} -> endpoint: ${valueEndpoint.getName().get()} | ${valueEndpoint._server_id} | mode=${modeAttribute.value.get()}`);
     }
     logger.map('');
   }
@@ -131,12 +137,14 @@ async function regulationTick(
 
   for (const [macroZone, entry] of macroZoneMap) {
     const state = states.get(macroZone)!;
-    const macroZoneName = macroZone.getName().get();
+    const macroZoneTag = `${macroZone.getName().get()} | mz ${macroZone._server_id}`;
 
     // 1. Mode Fonctionnement gate — re-read every tick so toggles take effect on the next one.
+    // Some endpoints store the flag as boolean (true/false), others as numeric (1/0); accept both.
     if (!testMode) {
       const mfValue = await getEndpointCurrentValue(entry.modeFonctionnement);
-      if (mfValue !== true) continue;
+      const mfOn = mfValue === true || mfValue === 1;
+      if (!mfOn) continue;
     }
 
     // 2. Skip macrozones that can't be regulated (warned at init).
@@ -154,25 +162,35 @@ async function regulationTick(
     if (isFirst || luxMoved) {
       const newTarget = calculateTargetPercent(avgLux, entry.regulationProfileType);
       const prev = state.lastAppliedAvgLux === null ? 'n/a' : state.lastAppliedAvgLux.toFixed(1);
-      logger.regulation(`\n[${macroZoneName}] avg lux: ${avgLux.toFixed(1)} (prev ${prev}) | profile ${entry.regulationProfileType} -> target ${newTarget}%`);
+      logger.regulation(`\n[${macroZoneTag}] avg lux: ${avgLux.toFixed(1)} (prev ${prev}) | profile ${entry.regulationProfileType} -> target ${newTarget}%`);
       state.lastAppliedAvgLux = avgLux;
-      for (const [microZone, endpoint] of entry.microZones) {
-        state.microZoneTargets.set(microZone, { endpoint, targetPercent: newTarget });
+      for (const microZone of entry.microZones.keys()) {
+        state.microZoneTargets.set(microZone, { targetPercent: newTarget });
       }
     }
 
     // 5. Advance active ramps by one step (≤ 1%/s cap).
     if (state.microZoneTargets.size === 0) continue;
     await Promise.all([...state.microZoneTargets].map(async ([microZone, ramp]) => {
-      const current = Number(await getEndpointCurrentValue(ramp.endpoint));
+      const info = entry.microZones.get(microZone);
+      if (!info) {
+        state.microZoneTargets.delete(microZone);
+        return;
+      }
+      // Per-microzone mode gate: only regulate when mode === 'auto' (unless TEST_MODE=1).
+      // We preserve the ramp target so manual→auto resumes from the latest target on the next tick.
+      if (!testMode && info.modeAttribute.value.get() !== 'auto') return;
+
+      const microZoneTag = `[${macroZoneTag}] [${microZone.getName().get()} | mz ${microZone._server_id} | ep ${info.valueEndpoint._server_id}]`;
+      const current = Number(await getEndpointCurrentValue(info.valueEndpoint));
       if (isNaN(current)) {
-        logger.warning(`  [${microZone.getName().get()}] current value not numeric; dropping from ramp.`);
+        logger.warning(`  ${microZoneTag} current value not numeric; dropping from ramp.`);
         state.microZoneTargets.delete(microZone);
         return;
       }
       const diff = ramp.targetPercent - current;
       if (Math.abs(diff) < 0.01) {
-        logger.regulation(`  [${microZone.getName().get()}] reached target ${ramp.targetPercent}%`);
+        logger.regulation(`  ${microZoneTag} reached target ${ramp.targetPercent}%`);
         state.microZoneTargets.delete(microZone);
         return;
       }
@@ -180,8 +198,8 @@ async function regulationTick(
       const newValue = Math.abs(diff) <= maxStepSize
         ? ramp.targetPercent
         : Math.round((current + direction * maxStepSize) * 100) / 100;
-      await setEndpointCurrentValue(ramp.endpoint, newValue);
-      logger.regulation(`  [${microZone.getName().get()}] ${current}% -> ${newValue}% (target ${ramp.targetPercent}%)`);
+      await setEndpointCurrentValue(info.valueEndpoint, newValue);
+      logger.regulation(`  ${microZoneTag} ${current}% -> ${newValue}% (target ${ramp.targetPercent}%)`);
     }));
   }
 }

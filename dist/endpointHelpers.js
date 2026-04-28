@@ -9,7 +9,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMulticapteurLuminosityEndpoint = exports.getMicroZoneValueNode = exports.getMacroZoneModeFonctionnementNode = exports.getEndpointCurrentValue = exports.setEndpointCurrentValue = void 0;
+exports.getOrCreateMicroZoneModeAttributeModel = exports.getMulticapteurLuminosityEndpoint = exports.getMicroZoneValueNode = exports.getMacroZoneModeFonctionnementNode = exports.getEndpointCurrentValue = exports.setEndpointCurrentValue = void 0;
+const spinal_env_viewer_plugin_documentation_service_1 = require("spinal-env-viewer-plugin-documentation-service");
 function setEndpointCurrentValue(endpoint, value) {
     return __awaiter(this, void 0, void 0, function* () {
         const element = yield endpoint.element.load();
@@ -56,4 +57,15 @@ function getMulticapteurLuminosityEndpoint(multicapteur) {
     });
 }
 exports.getMulticapteurLuminosityEndpoint = getMulticapteurLuminosityEndpoint;
+function getOrCreateMicroZoneModeAttributeModel(microZone) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const attribute = yield spinal_env_viewer_plugin_documentation_service_1.attributeService.findOneAttributeInCategory(microZone, 'default', 'mode');
+        if (attribute != -1) {
+            return attribute;
+        }
+        const newAttribute = yield spinal_env_viewer_plugin_documentation_service_1.attributeService.addAttributeByCategoryName(microZone, 'default', 'mode', 'auto');
+        return newAttribute;
+    });
+}
+exports.getOrCreateMicroZoneModeAttributeModel = getOrCreateMicroZoneModeAttributeModel;
 //# sourceMappingURL=endpointHelpers.js.map

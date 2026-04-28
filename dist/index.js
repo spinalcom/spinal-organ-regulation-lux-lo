@@ -132,20 +132,27 @@ class SpinalMain {
                 if (!mcInfo) {
                     logger_1.logger.warning(`MacroZone "${macroZoneName}" not found in hwCtxtMulticapteurs. Keeping with empty luminosityEndpoints and undefined regulationProfileType.`);
                 }
-                const microZoneEndpoints = new Map();
+                const microZoneInfos = new Map();
                 yield Promise.all(microZones.map((microZone) => __awaiter(this, void 0, void 0, function* () {
-                    const valueEndpoint = yield (0, endpointHelpers_1.getMicroZoneValueNode)(microZone);
+                    const [valueEndpoint, modeAttribute] = yield Promise.all([
+                        (0, endpointHelpers_1.getMicroZoneValueNode)(microZone),
+                        (0, endpointHelpers_1.getOrCreateMicroZoneModeAttributeModel)(microZone),
+                    ]);
                     if (!valueEndpoint) {
                         logger_1.logger.warning(`No "Value" endpoint found for microZone ${microZone.getName().get()} (id: ${microZone._server_id}) under macroZone ${macroZone.getName().get()}`);
                         return;
                     }
-                    microZoneEndpoints.set(microZone, valueEndpoint);
+                    if (!modeAttribute) {
+                        logger_1.logger.warning(`No "mode" attribute available for microZone ${microZone.getName().get()} (id: ${microZone._server_id}) under macroZone ${macroZone.getName().get()}; skipping.`);
+                        return;
+                    }
+                    microZoneInfos.set(microZone, { valueEndpoint, modeAttribute });
                 })));
                 macroZoneMap.set(macroZone, {
                     modeFonctionnement,
                     regulationProfileType: mcInfo === null || mcInfo === void 0 ? void 0 : mcInfo.regulationProfileType,
                     luminosityEndpoints: (_a = mcInfo === null || mcInfo === void 0 ? void 0 : mcInfo.luminosityEndpoints) !== null && _a !== void 0 ? _a : [],
-                    microZones: microZoneEndpoints,
+                    microZones: microZoneInfos,
                 });
             })));
             return macroZoneMap;
