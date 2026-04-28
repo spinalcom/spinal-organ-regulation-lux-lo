@@ -63,13 +63,17 @@ exports.macroZoneMapLog = macroZoneMapLog;
 function resetAllModeFonctionnement(macroZoneMap) {
     return __awaiter(this, void 0, void 0, function* () {
         const promises = [];
-        for (const [macroZone, { modeFonctionnement }] of macroZoneMap) {
+        for (const [macroZone, { modeFonctionnement, microZones }] of macroZoneMap) {
             promises.push((0, endpointHelpers_1.setEndpointCurrentValue)(modeFonctionnement, false).then(() => {
                 logger_1.logger.regulation(`  [${macroZone.getName().get()}] Mode Fonctionnement reset to false`);
             }));
+            for (const [microZone, info] of microZones) {
+                info.modeAttribute.value.set('auto');
+                logger_1.logger.regulation(`  [${macroZone.getName().get()}] [${microZone.getName().get()}] mode reset to 'auto'`);
+            }
         }
         yield Promise.all(promises);
-        logger_1.logger.regulation('\nAll Mode Fonctionnement endpoints reset to false.');
+        logger_1.logger.regulation('\nAll Mode Fonctionnement endpoints reset to false; all microzone mode attributes reset to auto.');
     });
 }
 exports.resetAllModeFonctionnement = resetAllModeFonctionnement;
@@ -106,7 +110,8 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
             const macroZoneTag = `${macroZone.getName().get()} | mz ${macroZone._server_id}`;
             if (!testMode) {
                 const mfValue = yield (0, endpointHelpers_1.getEndpointCurrentValue)(entry.modeFonctionnement);
-                if (mfValue !== true)
+                const mfOn = mfValue === true || mfValue === 1;
+                if (!mfOn)
                     continue;
             }
             if (!entry.regulationProfileType || entry.luminosityEndpoints.length === 0)

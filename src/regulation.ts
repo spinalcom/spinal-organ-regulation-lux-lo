@@ -80,15 +80,19 @@ export function macroZoneMapLog(macroZoneMap: MacroZoneMap) {
 
 export async function resetAllModeFonctionnement(macroZoneMap: MacroZoneMap): Promise<void> {
   const promises: Promise<void>[] = [];
-  for (const [macroZone, { modeFonctionnement }] of macroZoneMap) {
+  for (const [macroZone, { modeFonctionnement, microZones }] of macroZoneMap) {
     promises.push(
       setEndpointCurrentValue(modeFonctionnement, false).then(() => {
         logger.regulation(`  [${macroZone.getName().get()}] Mode Fonctionnement reset to false`);
       })
     );
+    for (const [microZone, info] of microZones) {
+      info.modeAttribute.value.set('auto');
+      logger.regulation(`  [${macroZone.getName().get()}] [${microZone.getName().get()}] mode reset to 'auto'`);
+    }
   }
   await Promise.all(promises);
-  logger.regulation('\nAll Mode Fonctionnement endpoints reset to false.');
+  logger.regulation('\nAll Mode Fonctionnement endpoints reset to false; all microzone mode attributes reset to auto.');
 }
 
 /**
