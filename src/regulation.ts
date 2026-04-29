@@ -78,7 +78,7 @@ export function macroZoneMapLog(macroZoneMap: MacroZoneMap) {
   logger.map(`Total: ${macroZoneMap.size} macrozones`);
 }
 
-export async function resetAllModeFonctionnement(macroZoneMap: MacroZoneMap): Promise<void> {
+export async function resetAllModes(macroZoneMap: MacroZoneMap): Promise<void> {
   const promises: Promise<void>[] = [];
   for (const [macroZone, { modeFonctionnement, microZones }] of macroZoneMap) {
     promises.push(

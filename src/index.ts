@@ -38,7 +38,7 @@ import { CronJob } from 'cron';
 import { logger } from './logger';
 import {
   macroZoneMapLog,
-  resetAllModeFonctionnement,
+  resetAllModes,
   startRegulationLoop,
   MacroZoneMap,
 } from './regulation';
@@ -260,7 +260,7 @@ async function Main() {
   // Schedule Mode Fonctionnement reset at 12h, 19h, and 22h (must be set up before entering the perpetual loop).
   const resetCron = new CronJob('0 12,19,22 * * *', async () => {
     logger.regulation(`\n[CRON ${new Date().toLocaleTimeString()}] Resetting all Mode Fonctionnement to false...`);
-    await resetAllModeFonctionnement(macroZoneMap);
+    await resetAllModes(macroZoneMap);
   });
   resetCron.start();
   logger.regulation('\nCron scheduled: Mode Fonctionnement reset at 12:00, 19:00, 22:00');

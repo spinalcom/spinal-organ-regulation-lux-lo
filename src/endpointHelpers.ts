@@ -41,12 +41,18 @@ export async function getMulticapteurLuminosityEndpoint(multicapteur: SpinalNode
 }
 
 export async function getOrCreateMicroZoneModeAttributeModel(microZone: SpinalNode<any>): Promise<SpinalAttribute | undefined> {
-  const attribute = await attributeService.findOneAttributeInCategory(microZone, 'default', 'mode');
+  // The attribute lives on the intermediate microzone-endpoint node (same name as the microzone),
+  // not on the microzone node itself. Same node we traverse through to reach the Value endpoint.
+  const firstLevelEndpoints = await microZone.getChildren('hasBmsEndpoint');
+  const microZoneEndpointNode = firstLevelEndpoints.find(ep => ep.getName().get() === microZone.getName().get());
+  if (!microZoneEndpointNode) return undefined;
+
+  const attribute = await attributeService.findOneAttributeInCategory(microZoneEndpointNode, 'default', 'mode');
   if (attribute != -1) {
     return attribute
   }
-  const newAttribute = await attributeService.addAttributeByCategoryName(microZone, 'default', 'mode', 'auto');
-  // the manual mode is set by another program that is in charge of setting the mode to 'manual' when the occupant changes it, 
+  const newAttribute = await attributeService.addAttributeByCategoryName(microZoneEndpointNode, 'default', 'mode', 'auto');
+  // the manual mode is set by another program that is in charge of setting the mode to 'manual' when the occupant changes it,
   // so we set it to 'auto' by default
 
   return newAttribute;
