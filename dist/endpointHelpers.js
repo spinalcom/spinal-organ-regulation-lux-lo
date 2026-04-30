@@ -59,11 +59,15 @@ function getMulticapteurLuminosityEndpoint(multicapteur) {
 exports.getMulticapteurLuminosityEndpoint = getMulticapteurLuminosityEndpoint;
 function getOrCreateMicroZoneModeAttributeModel(microZone) {
     return __awaiter(this, void 0, void 0, function* () {
-        const attribute = yield spinal_env_viewer_plugin_documentation_service_1.attributeService.findOneAttributeInCategory(microZone, 'default', 'mode');
+        const firstLevelEndpoints = yield microZone.getChildren('hasBmsEndpoint');
+        const microZoneEndpointNode = firstLevelEndpoints.find(ep => ep.getName().get() === microZone.getName().get());
+        if (!microZoneEndpointNode)
+            return undefined;
+        const attribute = yield spinal_env_viewer_plugin_documentation_service_1.attributeService.findOneAttributeInCategory(microZoneEndpointNode, 'default', 'mode');
         if (attribute != -1) {
             return attribute;
         }
-        const newAttribute = yield spinal_env_viewer_plugin_documentation_service_1.attributeService.addAttributeByCategoryName(microZone, 'default', 'mode', 'auto');
+        const newAttribute = yield spinal_env_viewer_plugin_documentation_service_1.attributeService.addAttributeByCategoryName(microZoneEndpointNode, 'default', 'mode', 'auto');
         return newAttribute;
     });
 }

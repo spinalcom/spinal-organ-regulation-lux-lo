@@ -34,6 +34,10 @@ import {
 } from 'spinal-env-viewer-graph-service';
 
 import { CronJob } from 'cron';
+import { EventEmitter } from 'events';
+
+
+EventEmitter.defaultMaxListeners = 100;
 
 import { logger } from './logger';
 import {

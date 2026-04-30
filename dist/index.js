@@ -12,6 +12,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const spinal_core_connectorjs_1 = require("spinal-core-connectorjs");
 const spinal_env_viewer_graph_service_1 = require("spinal-env-viewer-graph-service");
 const cron_1 = require("cron");
+const events_1 = require("events");
+events_1.EventEmitter.defaultMaxListeners = 100;
 const logger_1 = require("./logger");
 const regulation_1 = require("./regulation");
 const endpointHelpers_1 = require("./endpointHelpers");
@@ -172,7 +174,7 @@ function Main() {
         (0, regulation_1.macroZoneMapLog)(macroZoneMap);
         const resetCron = new cron_1.CronJob('0 12,19,22 * * *', () => __awaiter(this, void 0, void 0, function* () {
             logger_1.logger.regulation(`\n[CRON ${new Date().toLocaleTimeString()}] Resetting all Mode Fonctionnement to false...`);
-            yield (0, regulation_1.resetAllModeFonctionnement)(macroZoneMap);
+            yield (0, regulation_1.resetAllModes)(macroZoneMap);
         }));
         resetCron.start();
         logger_1.logger.regulation('\nCron scheduled: Mode Fonctionnement reset at 12:00, 19:00, 22:00');

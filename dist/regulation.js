@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.startRegulationLoop = exports.resetAllModeFonctionnement = exports.macroZoneMapLog = exports.calculateTargetPercent = void 0;
+exports.startRegulationLoop = exports.resetAllModes = exports.macroZoneMapLog = exports.calculateTargetPercent = void 0;
 const logger_1 = require("./logger");
 const endpointHelpers_1 = require("./endpointHelpers");
 const LUX_UPDATE_THRESHOLD = 50;
@@ -60,7 +60,7 @@ function macroZoneMapLog(macroZoneMap) {
     logger_1.logger.map(`Total: ${macroZoneMap.size} macrozones`);
 }
 exports.macroZoneMapLog = macroZoneMapLog;
-function resetAllModeFonctionnement(macroZoneMap) {
+function resetAllModes(macroZoneMap) {
     return __awaiter(this, void 0, void 0, function* () {
         const promises = [];
         for (const [macroZone, { modeFonctionnement, microZones }] of macroZoneMap) {
@@ -76,7 +76,7 @@ function resetAllModeFonctionnement(macroZoneMap) {
         logger_1.logger.regulation('\nAll Mode Fonctionnement endpoints reset to false; all microzone mode attributes reset to auto.');
     });
 }
-exports.resetAllModeFonctionnement = resetAllModeFonctionnement;
+exports.resetAllModes = resetAllModes;
 function startRegulationLoop(macroZoneMap, stepIntervalMs) {
     var _a;
     return __awaiter(this, void 0, void 0, function* () {
