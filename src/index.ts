@@ -51,6 +51,7 @@ import {
   getMicroZoneValueNode,
   getMulticapteurLuminosityEndpoint,
   getOrCreateMicroZoneModeAttributeModel,
+  getControlValueAttributeModel,
 } from './endpointHelpers';
 import { MicroZoneInfo } from './regulation';
 
@@ -228,7 +229,12 @@ class SpinalMain {
           logger.warning(`No "mode" attribute available for microZone ${microZone.getName().get()} (id: ${microZone._server_id}) under macroZone ${macroZone.getName().get()}; skipping.`);
           return;
         }
-        microZoneInfos.set(microZone, { valueEndpoint, modeAttribute });
+        const controlValueAttribute = await getControlValueAttributeModel(valueEndpoint);
+        if (!controlValueAttribute) {
+          logger.warning(`No "controlValue" attribute on Value endpoint for microZone ${microZone.getName().get()} (id: ${microZone._server_id}) under macroZone ${macroZone.getName().get()}; skipping.`);
+          return;
+        }
+        microZoneInfos.set(microZone, { valueEndpoint, modeAttribute, controlValueAttribute });
         // By the way, endpoints under microzones are shared between the different instances of the same microzone in different contexts :)
       }));
 

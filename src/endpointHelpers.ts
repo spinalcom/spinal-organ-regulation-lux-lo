@@ -57,3 +57,20 @@ export async function getOrCreateMicroZoneModeAttributeModel(microZone: SpinalNo
 
   return newAttribute;
 }
+
+export async function getControlValueAttributeModel(endpoint: SpinalNode<any>): Promise<SpinalAttribute | undefined> {
+  const attribute = await attributeService.findOneAttributeInCategory(endpoint, 'default', 'controlValue');
+  if (attribute != -1) {
+    return attribute;
+  }
+  const newAttribute = await attributeService.addAttributeByCategoryName(endpoint, 'default', 'controlValue', 'null');
+  return newAttribute;
+}
+
+export async function setEndpointControlValue(endpoint: SpinalNode<any>, value: any): Promise<boolean> {
+  const attr = await getControlValueAttributeModel(endpoint);
+  if (!attr) return false;
+  attr.value.set(value);
+  endpoint.setDirectModificationDate(Date.now());
+  return true;
+}

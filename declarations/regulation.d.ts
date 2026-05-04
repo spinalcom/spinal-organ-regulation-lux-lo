@@ -3,6 +3,7 @@ import { SpinalAttribute } from 'spinal-models-documentation';
 export type MicroZoneInfo = {
     valueEndpoint: SpinalNode<any>;
     modeAttribute: SpinalAttribute;
+    controlValueAttribute: SpinalAttribute;
 };
 export type MacroZoneEntry = {
     modeFonctionnement: SpinalNode<any>;

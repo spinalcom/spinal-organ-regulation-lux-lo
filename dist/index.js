@@ -148,7 +148,12 @@ class SpinalMain {
                         logger_1.logger.warning(`No "mode" attribute available for microZone ${microZone.getName().get()} (id: ${microZone._server_id}) under macroZone ${macroZone.getName().get()}; skipping.`);
                         return;
                     }
-                    microZoneInfos.set(microZone, { valueEndpoint, modeAttribute });
+                    const controlValueAttribute = yield (0, endpointHelpers_1.getControlValueAttributeModel)(valueEndpoint);
+                    if (!controlValueAttribute) {
+                        logger_1.logger.warning(`No "controlValue" attribute on Value endpoint for microZone ${microZone.getName().get()} (id: ${microZone._server_id}) under macroZone ${macroZone.getName().get()}; skipping.`);
+                        return;
+                    }
+                    microZoneInfos.set(microZone, { valueEndpoint, modeAttribute, controlValueAttribute });
                 })));
                 macroZoneMap.set(macroZone, {
                     modeFonctionnement,

@@ -13,7 +13,7 @@ exports.startRegulationLoop = exports.resetAllModes = exports.macroZoneMapLog = 
 const logger_1 = require("./logger");
 const endpointHelpers_1 = require("./endpointHelpers");
 const LUX_UPDATE_THRESHOLD = 50;
-const MAX_RAMP_PERCENT_PER_SECOND = 1;
+const MAX_RAMP_PERCENT_PER_SECOND = 0.5;
 function calculateTargetPercent(lux, profileType) {
     let result;
     if (profileType === '1') {
@@ -64,8 +64,11 @@ function resetAllModes(macroZoneMap) {
     return __awaiter(this, void 0, void 0, function* () {
         const promises = [];
         for (const [macroZone, { modeFonctionnement, microZones }] of macroZoneMap) {
-            promises.push((0, endpointHelpers_1.setEndpointCurrentValue)(modeFonctionnement, false).then(() => {
-                logger_1.logger.regulation(`  [${macroZone.getName().get()}] Mode Fonctionnement reset to false`);
+            promises.push((0, endpointHelpers_1.setEndpointControlValue)(modeFonctionnement, 0).then((ok) => {
+                if (ok)
+                    logger_1.logger.regulation(`  [${macroZone.getName().get()}] Mode Fonctionnement reset (controlValue=0)`);
+                else
+                    logger_1.logger.warning(`  [${macroZone.getName().get()}] Could not reset Mode Fonctionnement: no "controlValue" attribute on endpoint.`);
             }));
             for (const [microZone, info] of microZones) {
                 info.modeAttribute.value.set('auto');
@@ -73,7 +76,7 @@ function resetAllModes(macroZoneMap) {
             }
         }
         yield Promise.all(promises);
-        logger_1.logger.regulation('\nAll Mode Fonctionnement endpoints reset to false; all microzone mode attributes reset to auto.');
+        logger_1.logger.regulation('\nAll Mode Fonctionnement controlValues reset to 0; all microzone mode attributes reset to auto.');
     });
 }
 exports.resetAllModes = resetAllModes;
@@ -143,13 +146,14 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
                 if (!testMode && info.modeAttribute.value.get() !== 'auto')
                     return;
                 const microZoneTag = `[${macroZoneTag}] [${microZone.getName().get()} | mz ${microZone._server_id} | ep ${info.valueEndpoint._server_id}]`;
-                const current = Number(yield (0, endpointHelpers_1.getEndpointCurrentValue)(info.valueEndpoint));
-                if (isNaN(current)) {
-                    logger_1.logger.warning(`  ${microZoneTag} current value not numeric; dropping from ramp.`);
+                const basis = Number(info.controlValueAttribute.value.get());
+                if (isNaN(basis)) {
+                    info.controlValueAttribute.value.set(ramp.targetPercent);
+                    logger_1.logger.regulation(`  ${microZoneTag} controlValue not numeric; jumped directly to target ${ramp.targetPercent}%`);
                     state.microZoneTargets.delete(microZone);
                     return;
                 }
-                const diff = ramp.targetPercent - current;
+                const diff = ramp.targetPercent - basis;
                 if (Math.abs(diff) < 0.01) {
                     logger_1.logger.regulation(`  ${microZoneTag} reached target ${ramp.targetPercent}%`);
                     state.microZoneTargets.delete(microZone);
@@ -158,9 +162,9 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
                 const direction = diff > 0 ? 1 : -1;
                 const newValue = Math.abs(diff) <= maxStepSize
                     ? ramp.targetPercent
-                    : Math.round((current + direction * maxStepSize) * 100) / 100;
-                yield (0, endpointHelpers_1.setEndpointCurrentValue)(info.valueEndpoint, newValue);
-                logger_1.logger.regulation(`  ${microZoneTag} ${current}% -> ${newValue}% (target ${ramp.targetPercent}%)`);
+                    : Math.round((basis + direction * maxStepSize) * 100) / 100;
+                info.controlValueAttribute.value.set(newValue);
+                logger_1.logger.regulation(`  ${microZoneTag} prev controlValue=${basis}% wrote controlValue=${newValue}% (target ${ramp.targetPercent}%)`);
             })));
         }
     });

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getOrCreateMicroZoneModeAttributeModel = exports.getMulticapteurLuminosityEndpoint = exports.getMicroZoneValueNode = exports.getMacroZoneModeFonctionnementNode = exports.getEndpointCurrentValue = exports.setEndpointCurrentValue = void 0;
+exports.setEndpointControlValue = exports.getControlValueAttributeModel = exports.getOrCreateMicroZoneModeAttributeModel = exports.getMulticapteurLuminosityEndpoint = exports.getMicroZoneValueNode = exports.getMacroZoneModeFonctionnementNode = exports.getEndpointCurrentValue = exports.setEndpointCurrentValue = void 0;
 const spinal_env_viewer_plugin_documentation_service_1 = require("spinal-env-viewer-plugin-documentation-service");
 function setEndpointCurrentValue(endpoint, value) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -72,4 +72,26 @@ function getOrCreateMicroZoneModeAttributeModel(microZone) {
     });
 }
 exports.getOrCreateMicroZoneModeAttributeModel = getOrCreateMicroZoneModeAttributeModel;
+function getControlValueAttributeModel(endpoint) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const attribute = yield spinal_env_viewer_plugin_documentation_service_1.attributeService.findOneAttributeInCategory(endpoint, 'default', 'controlValue');
+        if (attribute != -1) {
+            return attribute;
+        }
+        const newAttribute = yield spinal_env_viewer_plugin_documentation_service_1.attributeService.addAttributeByCategoryName(endpoint, 'default', 'controlValue', 'null');
+        return newAttribute;
+    });
+}
+exports.getControlValueAttributeModel = getControlValueAttributeModel;
+function setEndpointControlValue(endpoint, value) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const attr = yield getControlValueAttributeModel(endpoint);
+        if (!attr)
+            return false;
+        attr.value.set(value);
+        endpoint.setDirectModificationDate(Date.now());
+        return true;
+    });
+}
+exports.setEndpointControlValue = setEndpointControlValue;
 //# sourceMappingURL=endpointHelpers.js.map

@@ -6,3 +6,5 @@ export declare function getMacroZoneModeFonctionnementNode(macroZone: SpinalNode
 export declare function getMicroZoneValueNode(microZone: SpinalNode<any>): Promise<SpinalNode<any> | undefined>;
 export declare function getMulticapteurLuminosityEndpoint(multicapteur: SpinalNode<any>): Promise<SpinalNode<any> | undefined>;
 export declare function getOrCreateMicroZoneModeAttributeModel(microZone: SpinalNode<any>): Promise<SpinalAttribute | undefined>;
+export declare function getControlValueAttributeModel(endpoint: SpinalNode<any>): Promise<SpinalAttribute | undefined>;
+export declare function setEndpointControlValue(endpoint: SpinalNode<any>, value: any): Promise<boolean>;

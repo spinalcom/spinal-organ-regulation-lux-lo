@@ -1,11 +1,12 @@
 import { SpinalNode } from 'spinal-env-viewer-graph-service';
 import { SpinalAttribute } from 'spinal-models-documentation';
 import { logger } from './logger';
-import { getEndpointCurrentValue, setEndpointCurrentValue } from './endpointHelpers';
+import { getEndpointCurrentValue, setEndpointControlValue } from './endpointHelpers';
 
 export type MicroZoneInfo = {
   valueEndpoint: SpinalNode<any>;
   modeAttribute: SpinalAttribute;
+  controlValueAttribute: SpinalAttribute;
 };
 
 export type MacroZoneEntry = {
@@ -17,8 +18,8 @@ export type MacroZoneEntry = {
 
 export type MacroZoneMap = Map<SpinalNode<any>, MacroZoneEntry>;
 
-const LUX_UPDATE_THRESHOLD = 50;       // Retarget when avg lux moves more than this vs the lux that drove the last retarget.
-const MAX_RAMP_PERCENT_PER_SECOND = 1; // Cap on ramp speed (applies to each microzone).
+const LUX_UPDATE_THRESHOLD = 50;         // Retarget when avg lux moves more than this vs the lux that drove the last retarget.
+const MAX_RAMP_PERCENT_PER_SECOND = 0.5; // Cap on ramp speed (applies to each microzone).
 
 type MicroZoneRamp = { targetPercent: number };
 
@@ -82,8 +83,9 @@ export async function resetAllModes(macroZoneMap: MacroZoneMap): Promise<void> {
   const promises: Promise<void>[] = [];
   for (const [macroZone, { modeFonctionnement, microZones }] of macroZoneMap) {
     promises.push(
-      setEndpointCurrentValue(modeFonctionnement, false).then(() => {
-        logger.regulation(`  [${macroZone.getName().get()}] Mode Fonctionnement reset to false`);
+      setEndpointControlValue(modeFonctionnement, 0).then((ok) => {
+        if (ok) logger.regulation(`  [${macroZone.getName().get()}] Mode Fonctionnement reset (controlValue=0)`);
+        else logger.warning(`  [${macroZone.getName().get()}] Could not reset Mode Fonctionnement: no "controlValue" attribute on endpoint.`);
       })
     );
     for (const [microZone, info] of microZones) {
@@ -92,7 +94,7 @@ export async function resetAllModes(macroZoneMap: MacroZoneMap): Promise<void> {
     }
   }
   await Promise.all(promises);
-  logger.regulation('\nAll Mode Fonctionnement endpoints reset to false; all microzone mode attributes reset to auto.');
+  logger.regulation('\nAll Mode Fonctionnement controlValues reset to 0; all microzone mode attributes reset to auto.');
 }
 
 /**
@@ -186,13 +188,19 @@ async function regulationTick(
       if (!testMode && info.modeAttribute.value.get() !== 'auto') return;
 
       const microZoneTag = `[${macroZoneTag}] [${microZone.getName().get()} | mz ${microZone._server_id} | ep ${info.valueEndpoint._server_id}]`;
-      const current = Number(await getEndpointCurrentValue(info.valueEndpoint));
-      if (isNaN(current)) {
-        logger.warning(`  ${microZoneTag} current value not numeric; dropping from ramp.`);
+      // Ramp basis is the last-written controlValue (the regulation intent), not the observed currentValue.
+      // currentValue lags writes due to the indirection chain (controlValue → building system → currentValue update),
+      // so using it as the basis would cause redundant writes per tick.
+      const basis = Number(info.controlValueAttribute.value.get());
+      if (isNaN(basis)) {
+        // Freshly-created controlValue attribute (default 'null'): jump straight to target this tick.
+        // Subsequent retargets ramp normally since the attribute is now numeric.
+        info.controlValueAttribute.value.set(ramp.targetPercent);
+        logger.regulation(`  ${microZoneTag} controlValue not numeric; jumped directly to target ${ramp.targetPercent}%`);
         state.microZoneTargets.delete(microZone);
         return;
       }
-      const diff = ramp.targetPercent - current;
+      const diff = ramp.targetPercent - basis;
       if (Math.abs(diff) < 0.01) {
         logger.regulation(`  ${microZoneTag} reached target ${ramp.targetPercent}%`);
         state.microZoneTargets.delete(microZone);
@@ -201,9 +209,9 @@ async function regulationTick(
       const direction = diff > 0 ? 1 : -1;
       const newValue = Math.abs(diff) <= maxStepSize
         ? ramp.targetPercent
-        : Math.round((current + direction * maxStepSize) * 100) / 100;
-      await setEndpointCurrentValue(info.valueEndpoint, newValue);
-      logger.regulation(`  ${microZoneTag} ${current}% -> ${newValue}% (target ${ramp.targetPercent}%)`);
+        : Math.round((basis + direction * maxStepSize) * 100) / 100;
+      info.controlValueAttribute.value.set(newValue);
+      logger.regulation(`  ${microZoneTag} prev controlValue=${basis}% wrote controlValue=${newValue}% (target ${ramp.targetPercent}%)`);
     }));
   }
 }
