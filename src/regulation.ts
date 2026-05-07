@@ -196,6 +196,7 @@ async function regulationTick(
         // Freshly-created controlValue attribute (default 'null'): jump straight to target this tick.
         // Subsequent retargets ramp normally since the attribute is now numeric.
         info.controlValueAttribute.value.set(ramp.targetPercent);
+        info.valueEndpoint.setDirectModificationDate(Date.now());
         logger.regulation(`  ${microZoneTag} controlValue not numeric; jumped directly to target ${ramp.targetPercent}%`);
         state.microZoneTargets.delete(microZone);
         return;
@@ -211,6 +212,7 @@ async function regulationTick(
         ? ramp.targetPercent
         : Math.round((basis + direction * maxStepSize) * 100) / 100;
       info.controlValueAttribute.value.set(newValue);
+      info.valueEndpoint.setDirectModificationDate(Date.now());
       logger.regulation(`  ${microZoneTag} prev controlValue=${basis}% wrote controlValue=${newValue}% (target ${ramp.targetPercent}%)`);
     }));
   }

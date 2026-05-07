@@ -149,6 +149,7 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
                 const basis = Number(info.controlValueAttribute.value.get());
                 if (isNaN(basis)) {
                     info.controlValueAttribute.value.set(ramp.targetPercent);
+                    info.valueEndpoint.setDirectModificationDate(Date.now());
                     logger_1.logger.regulation(`  ${microZoneTag} controlValue not numeric; jumped directly to target ${ramp.targetPercent}%`);
                     state.microZoneTargets.delete(microZone);
                     return;
@@ -164,6 +165,7 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
                     ? ramp.targetPercent
                     : Math.round((basis + direction * maxStepSize) * 100) / 100;
                 info.controlValueAttribute.value.set(newValue);
+                info.valueEndpoint.setDirectModificationDate(Date.now());
                 logger_1.logger.regulation(`  ${microZoneTag} prev controlValue=${basis}% wrote controlValue=${newValue}% (target ${ramp.targetPercent}%)`);
             })));
         }
