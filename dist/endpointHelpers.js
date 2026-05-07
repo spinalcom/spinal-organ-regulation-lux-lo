@@ -89,7 +89,7 @@ function setEndpointControlValue(endpoint, value) {
         if (!attr)
             return false;
         attr.value.set(value);
-        endpoint.setDirectModificationDate(Date.now());
+        endpoint.info.directModificationDate.set(Date.now());
         return true;
     });
 }
