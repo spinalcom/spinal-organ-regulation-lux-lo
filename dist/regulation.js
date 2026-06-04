@@ -113,7 +113,7 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
             const macroZoneTag = `${macroZone.getName().get()} | mz ${macroZone._server_id}`;
             if (!testMode) {
                 const mfValue = yield (0, endpointHelpers_1.getEndpointCurrentValue)(entry.modeFonctionnement);
-                const mfOn = mfValue === true || mfValue === 1;
+                const mfOn = mfValue === true || mfValue === 1 || mfValue === 'true' || mfValue === '1';
                 if (!mfOn)
                     continue;
             }

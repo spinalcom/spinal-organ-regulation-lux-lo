@@ -149,7 +149,7 @@ async function regulationTick(
     // Some endpoints store the flag as boolean (true/false), others as numeric (1/0); accept both.
     if (!testMode) {
       const mfValue = await getEndpointCurrentValue(entry.modeFonctionnement);
-      const mfOn = mfValue === true || mfValue === 1;
+      const mfOn = mfValue === true || mfValue === 1 || mfValue === 'true' || mfValue === '1';
       if (!mfOn) continue;
     }
 
