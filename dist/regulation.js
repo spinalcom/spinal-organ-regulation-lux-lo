@@ -112,9 +112,9 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
             const state = states.get(macroZone);
             const macroZoneTag = `${macroZone.getName().get()} | mz ${macroZone._server_id}`;
             if (!testMode) {
-                const mfValue = yield (0, endpointHelpers_1.getEndpointCurrentValue)(entry.modeFonctionnement);
-                const mfOn = mfValue === true || mfValue === 1 || mfValue === 'true' || mfValue === '1';
-                if (!mfOn)
+                const mfCurrent = yield (0, endpointHelpers_1.getEndpointCurrentValue)(entry.modeFonctionnement);
+                const mfControl = entry.modeControlValueAttribute.value.get();
+                if (!isModeOn(mfCurrent) || !isModeOn(mfControl))
                     continue;
             }
             if (!entry.regulationProfileType || entry.luminosityEndpoints.length === 0)
@@ -170,6 +170,9 @@ function regulationTick(macroZoneMap, states, stepIntervalMs) {
             })));
         }
     });
+}
+function isModeOn(value) {
+    return value === true || value === 1 || value === 'true' || value === '1';
 }
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));

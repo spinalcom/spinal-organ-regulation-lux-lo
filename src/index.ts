@@ -214,6 +214,14 @@ class SpinalMain {
         logger.warning(`MacroZone "${macroZoneName}" not found in hwCtxtMulticapteurs. Keeping with empty luminosityEndpoints and undefined regulationProfileType.`);
       }
 
+      // controlValue attribute of the Mode Fonctionnement endpoint: this is what the reset writes (0)
+      // and what the regulation gate reads alongside currentValue. Created if missing.
+      const modeControlValueAttribute = await getControlValueAttributeModel(modeFonctionnement);
+      if (!modeControlValueAttribute) {
+        logger.warning(`No "controlValue" attribute on Mode fonctionnement endpoint for macroZone ${macroZoneName} (id: ${macroZone._server_id}); skipping.`);
+        return;
+      }
+
       // Fetch all microZone value endpoints + mode attributes in parallel
       const microZoneInfos = new Map<SpinalNode<any>, MicroZoneInfo>();
       await Promise.all(microZones.map(async (microZone: SpinalNode<any>) => {
@@ -240,6 +248,7 @@ class SpinalMain {
 
       macroZoneMap.set(macroZone, {
         modeFonctionnement,
+        modeControlValueAttribute,
         regulationProfileType: mcInfo?.regulationProfileType,
         luminosityEndpoints: mcInfo?.luminosityEndpoints ?? [],
         microZones: microZoneInfos,
@@ -266,6 +275,17 @@ async function Main() {
   }
 
   macroZoneMapLog(macroZoneMap);
+
+  // Filter out macrozones without a regulation profile type (not found in hwCtxtMulticapteurs).
+  // They are never regulated, and including them in the reset would emit a lot of controlValue
+  // writes -- each triggers an OPCUA command downstream. Logged in full above before removal.
+  for (const [macroZone, entry] of macroZoneMap) {
+    if (!entry.regulationProfileType) {
+      logger.regulation(`Excluding macroZone "${macroZone.getName().get()}" (id ${macroZone._server_id}) from regulation/reset: no regulation profile type.`);
+      macroZoneMap.delete(macroZone);
+    }
+  }
+  logger.regulation(`\n${macroZoneMap.size} macrozone(s) retained for regulation/reset after filtering.`);
 
   // Schedule Mode Fonctionnement reset at 12h, 19h, and 22h (must be set up before entering the perpetual loop).
   const resetCron = new CronJob('0 12,19,22 * * *', async () => {

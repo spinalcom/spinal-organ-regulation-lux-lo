@@ -134,6 +134,11 @@ class SpinalMain {
                 if (!mcInfo) {
                     logger_1.logger.warning(`MacroZone "${macroZoneName}" not found in hwCtxtMulticapteurs. Keeping with empty luminosityEndpoints and undefined regulationProfileType.`);
                 }
+                const modeControlValueAttribute = yield (0, endpointHelpers_1.getControlValueAttributeModel)(modeFonctionnement);
+                if (!modeControlValueAttribute) {
+                    logger_1.logger.warning(`No "controlValue" attribute on Mode fonctionnement endpoint for macroZone ${macroZoneName} (id: ${macroZone._server_id}); skipping.`);
+                    return;
+                }
                 const microZoneInfos = new Map();
                 yield Promise.all(microZones.map((microZone) => __awaiter(this, void 0, void 0, function* () {
                     const [valueEndpoint, modeAttribute] = yield Promise.all([
@@ -157,6 +162,7 @@ class SpinalMain {
                 })));
                 macroZoneMap.set(macroZone, {
                     modeFonctionnement,
+                    modeControlValueAttribute,
                     regulationProfileType: mcInfo === null || mcInfo === void 0 ? void 0 : mcInfo.regulationProfileType,
                     luminosityEndpoints: (_a = mcInfo === null || mcInfo === void 0 ? void 0 : mcInfo.luminosityEndpoints) !== null && _a !== void 0 ? _a : [],
                     microZones: microZoneInfos,
@@ -177,6 +183,13 @@ function Main() {
             return;
         }
         (0, regulation_1.macroZoneMapLog)(macroZoneMap);
+        for (const [macroZone, entry] of macroZoneMap) {
+            if (!entry.regulationProfileType) {
+                logger_1.logger.regulation(`Excluding macroZone "${macroZone.getName().get()}" (id ${macroZone._server_id}) from regulation/reset: no regulation profile type.`);
+                macroZoneMap.delete(macroZone);
+            }
+        }
+        logger_1.logger.regulation(`\n${macroZoneMap.size} macrozone(s) retained for regulation/reset after filtering.`);
         const resetCron = new cron_1.CronJob('0 12,19,22 * * *', () => __awaiter(this, void 0, void 0, function* () {
             logger_1.logger.regulation(`\n[CRON ${new Date().toLocaleTimeString()}] Resetting all Mode Fonctionnement to false...`);
             yield (0, regulation_1.resetAllModes)(macroZoneMap);

@@ -7,6 +7,7 @@ export type MicroZoneInfo = {
 };
 export type MacroZoneEntry = {
     modeFonctionnement: SpinalNode<any>;
+    modeControlValueAttribute: SpinalAttribute;
     regulationProfileType: string | undefined;
     luminosityEndpoints: SpinalNode<any>[];
     microZones: Map<SpinalNode<any>, MicroZoneInfo>;

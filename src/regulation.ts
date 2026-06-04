@@ -11,6 +11,7 @@ export type MicroZoneInfo = {
 
 export type MacroZoneEntry = {
   modeFonctionnement: SpinalNode<any>;
+  modeControlValueAttribute: SpinalAttribute;
   regulationProfileType: string | undefined;
   luminosityEndpoints: SpinalNode<any>[];
   microZones: Map<SpinalNode<any>, MicroZoneInfo>;
@@ -146,11 +147,15 @@ async function regulationTick(
     const macroZoneTag = `${macroZone.getName().get()} | mz ${macroZone._server_id}`;
 
     // 1. Mode Fonctionnement gate — re-read every tick so toggles take effect on the next one.
-    // Some endpoints store the flag as boolean (true/false), others as numeric (1/0); accept both.
+    // Require BOTH the observed currentValue AND the commanded controlValue to be "on".
+    // controlValue is the intent (what we/other programs send); currentValue is the observed state
+    // that lags behind through OPCUA. Checking controlValue too closes the post-reset race window:
+    // a reset writes controlValue=0 immediately, so we stop regulating without waiting for
+    // currentValue to sync back (otherwise microzones would briefly regulate against a stale `true`).
     if (!testMode) {
-      const mfValue = await getEndpointCurrentValue(entry.modeFonctionnement);
-      const mfOn = mfValue === true || mfValue === 1 || mfValue === 'true' || mfValue === '1';
-      if (!mfOn) continue;
+      const mfCurrent = await getEndpointCurrentValue(entry.modeFonctionnement);
+      const mfControl = entry.modeControlValueAttribute.value.get();
+      if (!isModeOn(mfCurrent) || !isModeOn(mfControl)) continue;
     }
 
     // 2. Skip macrozones that can't be regulated (warned at init).
@@ -216,6 +221,15 @@ async function regulationTick(
       logger.regulation(`  ${microZoneTag} prev controlValue=${basis}% wrote controlValue=${newValue}% (target ${ramp.targetPercent}%)`);
     }));
   }
+}
+
+/**
+ * Whether a Mode Fonctionnement value counts as "on".
+ * Endpoints store the flag inconsistently , boolean (true/false), numeric (1/0), or string
+ * ('true'/'1') after OPCUA type changes , so accept every truthy representation.
+ */
+function isModeOn(value: any): boolean {
+  return value === true || value === 1 || value === 'true' || value === '1';
 }
 
 function sleep(ms: number): Promise<void> {
